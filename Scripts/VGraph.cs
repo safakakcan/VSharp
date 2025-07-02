@@ -97,7 +97,6 @@ public abstract class DefinitionNode : VGraphNode
 
 public abstract class RuntimeNode : VGraphNode
 {
-    // Inherits GenerateCode
 }
 
 // --- Registry ---
@@ -162,7 +161,6 @@ public static class TopologicalSorter
 // --- Generic Resolver ---
 public static class GenericTypeResolver
 {
-    // Implementation omitted for brevity
     public static void InferGenericTypes(VGraphNode node, VGraphNode fromNode, VSlot fromSlot, string inputName) { }
     public static void Resolve(VGraphNode node, Dictionary<string, VType> resolved) { }
 }
@@ -175,7 +173,7 @@ public static class ReflectionImporter
         if (type.IsGenericTypeDefinition) return;
         var def = new ClassDefinitionNode(type.Name);
         def.Fields = type.GetFields(BindingFlags.Public | BindingFlags.Instance)
-            .Select(f => (f.Name, ReflectionImporter.ToVType(f.FieldType))).ToList();
+            .Select(f => (f.Name, ToVType(f.FieldType))).ToList();
         foreach (var m in type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static))
         {
             if (m.IsSpecialName) continue;
@@ -183,7 +181,7 @@ public static class ReflectionImporter
             {
                 MethodName = m.Name,
                 IsStatic = m.IsStatic,
-                ReturnType = ReflectionImporter.ToVType(m.ReturnType),
+                ReturnType = ToVType(m.ReturnType),
                 DeclaringClass = type.Name
             };
             foreach (var p in m.GetParameters())
@@ -194,10 +192,11 @@ public static class ReflectionImporter
     }
     public static VType ToVType(Type t)
     {
-        return t == typeof(int) ? VType.Int :
-               t == typeof(float) ? VType.Float :
-               t == typeof(bool) ? VType.Bool :
-               t == typeof(string) ? VType.String : VType.Object;
+        if (t == typeof(int)) return VType.Int;
+        if (t == typeof(float)) return VType.Float;
+        if (t == typeof(bool)) return VType.Bool;
+        if (t == typeof(string)) return VType.String;
+        return VType.Object;
     }
 }
 
@@ -208,11 +207,8 @@ public class CodeBuilder
     {
         var sb = new StringBuilder();
         foreach (var u in context.Usings) sb.AppendLine($"using {u};");
-        // Emit class definitions
         foreach (var def in context.Registry.All.OfType<ClassDefinitionNode>())
-        {
             sb.AppendLine(def.GenerateDefinitionCode());
-        }
         sb.AppendLine("public static class GeneratedClass { public static object Execute() {");
         foreach (var node in TopologicalSorter.Sort(nodes))
             sb.AppendLine("    " + node.GenerateCode(context));
@@ -229,9 +225,14 @@ public class RoslynCompiler
         var refs = AppDomain.CurrentDomain.GetAssemblies()
             .Where(a => !a.IsDynamic && !string.IsNullOrWhiteSpace(a.Location))
             .Select(a => MetadataReference.CreateFromFile(a.Location));
-        var comp = CSharpCompilation.Create("GeneratedAssembly", new[] { tree }, refs,
-            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
-        using var ms = new MemoryStream(); var result = comp.Emit(ms);
+        var comp = CSharpCompilation.Create(
+            assemblyName: "GeneratedAssembly",
+            syntaxTrees: new[] { tree },
+            references: refs,
+            options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
+        );
+        using var ms = new MemoryStream();
+        var result = comp.Emit(ms);
         diagnostics = result.Diagnostics;
         if (!result.Success) return null;
         ms.Seek(0, SeekOrigin.Begin);
@@ -264,10 +265,10 @@ public class ClassDefinitionNode : DefinitionNode
         VType.String => "string",
         _ => "object"
     };
-    
+
     public override string GenerateCode(CodeGenContext context)
     {
-        throw new NotImplementedException();
+        return GenerateDefinitionCode();
     }
 }
 
@@ -278,10 +279,37 @@ public class MethodDefinitionNode : DefinitionNode
     public VType ReturnType;
     public string DeclaringClass;
     public List<VSlot> Parameters { get; set; } = new();
-    
+
     public override string GenerateCode(CodeGenContext context)
     {
-        throw new NotImplementedException();
+        string returnType = ReturnType switch
+        {
+            VType.Int    => "int",
+            VType.Float  => "float",
+            VType.Bool   => "bool",
+            VType.String => "string",
+            VType.Void   => "void",
+            _            => "object"
+        };
+        string paramList = string.Join(", ", Parameters.Select(p =>
+        {
+            string pType = p.Type switch
+            {
+                VType.Int    => "int",
+                VType.Float  => "float",
+                VType.Bool   => "bool",
+                VType.String => "string",
+                _            => "object"
+            };
+            return $"{pType} {p.Name}";
+        }));
+        string modifiers = IsStatic ? "public static" : "public";
+        var sb = new StringBuilder();
+        sb.AppendLine($"{modifiers} {returnType} {MethodName}({paramList})");
+        sb.AppendLine("{");
+        sb.AppendLine("    throw new NotImplementedException();");
+        sb.AppendLine("}");
+        return sb.ToString();
     }
 }
 
