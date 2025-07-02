@@ -1,3 +1,4 @@
+using Godot;
 namespace VSharp.Scripts;
 using System.IO;
 using System;
@@ -61,7 +62,7 @@ public class MemoryAllocator
     {
         var slot = new MemorySlot(_counter, type)
         {
-            Name = nameHint != null ? $"{nameHint}{_counter}" : null
+            Name = nameHint != null ? $"{nameHint}" : null
         };
         _counter++;
         _slots.Add(slot);
@@ -83,7 +84,7 @@ public class CodeGenContext
 // --- Node Hierarchy ---
 public abstract class VGraphNode
 {
-    public string Id { get; } = Guid.NewGuid().ToString();
+    public string Id { get; protected set; } = Guid.NewGuid().ToString();
     public List<VSlot> Inputs { get; set; } = new();
     public List<VSlot> Outputs { get; set; } = new();
     public Dictionary<string, string> ConnectedInputs { get; set; } = new();
@@ -316,14 +317,15 @@ public class MethodDefinitionNode : DefinitionNode
 public class VariableNode : RuntimeNode
 {
     public object Value;
-    public VariableNode(VType type, object value)
+    public VariableNode(VType type, string variableName, object value)
     {
+        Id = variableName;
         Outputs.Add(new VSlot("Value", type));
         Value = value;
     }
     public override string GenerateCode(CodeGenContext context)
     {
-        var slot = context.Memory.Allocate(Value.GetType(), "val");
+        var slot = context.Memory.Allocate(Value.GetType(), $"{Id}");
         context.NodeOutputs[Id] = slot;
         return $"var {slot} = {Value};";
     }
